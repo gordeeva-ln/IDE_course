@@ -146,8 +146,6 @@ namespace MyTests
             {
                 var ch = text[i];
                 
-                if (operations.Any() && operations.Peek() == '@') break;
-                
                 if (ch == ')' && operations.Peek() == '(')
                 {
                     operations.Pop();
