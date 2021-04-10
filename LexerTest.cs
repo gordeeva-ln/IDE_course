@@ -15,30 +15,30 @@ namespace MyTests
     }
     public class Lexeme
     {
-        private readonly LexemeType _type;
+        public readonly LexemeType Type;
         public int Begin;
         public int End;
-        private readonly List<Lexeme> _lexemes;
+        public readonly List<Lexeme> Lexemes;  // for nested comments
 
         public Lexeme(LexemeType type, int begin, int end, List<Lexeme> lexemes=null)
         {
-            _type = type;
+            Type = type;
             Begin = begin;
             End = end;
-            _lexemes = lexemes;
+            Lexemes = lexemes;
         }
 
         public override string ToString()
         {
-            var view = _type + "[" + Begin + "," + End + "]";
-            if (_lexemes == null || _lexemes.Count == 0) return view;
+            var view = Type + "[" + Begin + "," + End + "]";
+            if (Lexemes == null || Lexemes.Count == 0) return view;
             view += ":";
-            for (var i=0; i < _lexemes.Count-1;i++)
+            for (var i=0; i < Lexemes.Count-1;i++)
             {
-                view += _lexemes[i] + ", ";
+                view += Lexemes[i] + ", ";
             }
 
-            view += _lexemes[_lexemes.Count - 1] + ";";
+            view += Lexemes[Lexemes.Count - 1] + ";";
 
             return view;
         }
@@ -187,60 +187,51 @@ namespace MyTests
 
         private static Lexeme LexemeComment(string text)
         {
-            if (text.StartsWith("//") && text.IndexOf("\n") != -1)
-                text = text.Substring(0, text.IndexOf("\n"));
-            var pairs = new Dictionary<string, string>()
+            string start;
+            string end;
+
+            if (text.StartsWith("//"))
             {
-                {"(*", "*)"},
-                {"{", "}"}
-            };
-            string start = "//";
-            foreach (var startHyp in pairs.Keys)
-            {
-                if (text.StartsWith(startHyp))
-                {
-                    start = startHyp;
-                    break;
-                }
+                start = "//";
+                end = "";
+                if (text.IndexOf('\n') != -1) text = text.Substring(0, text.IndexOf('\n'));
             }
+            else if (text.StartsWith("(*"))
+            {
+                start = "(*";
+                end = "*)";
+            }
+            else
+            {
+                start = "{";
+                end = "}";
+            }
+            
             var current = start.Length;
 
             List<Lexeme> lexemes = new List<Lexeme>();
             while (current < text.Length)
             {
-                // если это начало вложенного комментария
+                // nested
                 if (current < text.Length && (
                     text.Substring(current).StartsWith("//") ||
                     text.Substring(current).StartsWith("(*") ||
                     text.Substring(current).StartsWith("{")))
                 {
-                    Console.Write("nested");
                     var lexeme = LexemeComment(text.Substring(current));
-                    lexemes.Add(lexeme);
+                    lexemes.Add(new Lexeme(lexeme.Type, lexeme.Begin + current, lexeme.End + current, lexeme.Lexemes));
                     current += lexeme.End;
                 }
 
-                if (current == text.Length && start.Equals("//") || !start.Equals("//") && current < text.Length &&
-                    text.Substring(current).StartsWith(pairs[start]))
-                {
-                    Console.Write("end");
-                    
-                    var end = 1;
-                    if (start.Equals("(*")) end = 2;
-                    if (start.Equals("//")) end = 0;
-                    return new Lexeme(LexemeType.Comment, 0, current + end, lexemes);
-                }
+                if (!start.Equals("//") && current < text.Length && text.Substring(current).StartsWith(end))
+                    return new Lexeme(LexemeType.Comment, 0, current + end.Length, lexemes);
                 
-                Console.Write("next");
                 current++;
             }
 
-            if (current == text.Length && start.Equals("//"))
+            if (start.Equals("//"))
             {
-                var end2 = 1;
-                if (start.Equals("(*")) end2 = 2;
-                if (start.Equals("//")) end2 = 0;
-                return new Lexeme(LexemeType.Comment, 0, current + end2, lexemes);
+                return new Lexeme(LexemeType.Comment, 0, text.Length, lexemes);
             }
             return null;
         }
@@ -270,35 +261,23 @@ namespace MyTests
 
         private static Lexeme LexemeCharString(string text)
         {
-            if (text.IndexOf("\n") != -1)
-                text = text.Substring(0, text.IndexOf("\n"));
+            if (text.IndexOf('\n') != -1)
+                text = text.Substring(0, text.IndexOf('\n'));
 
-            if (text.IndexOf("\r") != -1)
-                text = text.Substring(0, text.IndexOf("\r"));
+            if (text.IndexOf('\r') != -1)
+                text = text.Substring(0, text.IndexOf('\r'));
 
             int current = 0;
-            int next;
-            var count = 0;
+
             while (current < text.Length)
             {
-                // count++;
-                // if (count > 10) return null;
-                if (text[current].Equals('\''))
-                {
-                    next = QuotesInString(text.Substring(current + 1)) + 2;
-                }
+                int next;
+                if (text[current].Equals('\'')) next = QuotesInString(text.Substring(current + 1)) + 2;
                 else if (text[current].Equals('#')) next = SymbolsInString(text.Substring(current));
-                else
-                {
-                    return new Lexeme(LexemeType.CharacterString, 0, current);
-                }
+                else return new Lexeme(LexemeType.CharacterString, 0, current);
+                
 
-                if (next < 0)
-                {
-                    Console.Write("Next -1000");
-                    return new Lexeme(LexemeType.CharacterString, 0, current);
-                }
-
+                if (next < 0) return new Lexeme(LexemeType.CharacterString, 0, current);
                 current += next;
             }
 
@@ -340,14 +319,12 @@ namespace MyTests
 
         public static List<Lexeme> SplitToLexeme(string text)
         {
-            List<Lexeme> lexemes = new List<Lexeme>(); // список лексем
-            string tmp = text.ToLower(); // остаток строки, который нужно разбить на лексемы
+            List<Lexeme> lexemes = new List<Lexeme>();
+            string tmp = text.ToLower();
 
             while (true)
             {
-                Lexeme nextLexema = FindNextLexeme(tmp); // следующая лексема
-                Console.WriteLine(tmp);
-                Console.WriteLine(nextLexema);
+                Lexeme nextLexema = FindNextLexeme(tmp);
 
                 nextLexema.Begin += text.Length - tmp.Length;
                 nextLexema.End += text.Length - tmp.Length;
@@ -513,11 +490,11 @@ namespace MyTests
             
             text = "//comment 1 (*comment 2*)";
             split = SimpleLexer.SplitToLexeme(text);
-            Assert.AreEqual("Comment[0,25]:Comment[0,13];", viewSplit(split));
+            Assert.AreEqual("Comment[0,25]:Comment[12,25];", viewSplit(split));
             
             text = "//comment 1 //comment";
             split = SimpleLexer.SplitToLexeme(text);
-            Assert.AreEqual("Comment[0,21]:Comment[0,9];", viewSplit(split));
+            Assert.AreEqual("Comment[0,21]:Comment[12,21];", viewSplit(split));
         }
     }
 }
